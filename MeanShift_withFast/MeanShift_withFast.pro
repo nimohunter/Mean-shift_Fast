@@ -21,8 +21,7 @@ SOURCES +=  \
 #    videdetect.cpp \
 #    fastdetect.cpp \
     fastmeanshift.cpp
-
-#    deblur.cpp
+     Utils.cpp
 
 
 
