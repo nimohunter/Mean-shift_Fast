@@ -8,7 +8,10 @@
 using namespace cv;
 using namespace std;
 
-string srcImage = "/home/nimo/NewCamera/MeanShift_withFast_Data/FastDetect/regist_orignal_5.jpg";
+string srcImage = "regist_orignal_1.jpg";
+string srcImagePath = "/home/nimo/NewCamera/MeanShift_withFast_Data/Regist/";
+string desImagePath = "/home/nimo/NewCamera/MeanShift_withFast_Data/centroid_center/";
+
 
 // Use for Fast Detect
 int fast_threshold = 10;
@@ -31,40 +34,49 @@ Scalar yellow(0,255,255);
 void detectFastKeyPoint(Mat &img, vector<KeyPoint> &keyPoints);
 double caculateAreaByShoelaceFormula(vector<Point2f> &vertices);
 bool checkPointWithinParallelogram(Point2f point, vector<Point2f> &parallelogram_vertices, double parallelogram_area);
-void handleOneArucoMakerWithMeanShift(int index, Mat _image);
+void handleOneArucoMakerWithMeanShift(int index, Mat &_image);
+Point2f caculateTheCentroid(vector<Point2f> &keypoints_within);
 
 int main()
 {
-    Mat img_in = imread(srcImage);
+    Mat img_in = imread(srcImagePath + srcImage);
 
     // step 1. get fast detect
     Mat img_vis;
     img_in.copyTo(img_vis);
     detectFastKeyPoint(img_vis, fast_detect_key_points);
 
-//    int size = fast_detect_key_points.size();
-//    cout << "fast key:" << size << endl;
-//    drawKeypoints(img_vis,fast_detect_key_points,img_vis,Scalar(0,0,255),DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
-
     // Step 2. get Aruco detect
     img_in.copyTo(img_vis);
     cv::aruco::detectMarkers(img_vis, aruco_dictionary, corners, ids);
 
+    // Step3. detect the center and centroid
+    for (int i = 0; i < ids.size(); i++) {
+        handleOneArucoMakerWithMeanShift(i, img_vis);
+    }
 
-//    if (ids.size() > 0) {
-//    cv::aruco::drawDetectedMarkers(img_vis, corners, ids);
-//    }
-//    imshow("dsd", img_vis);
+    imwrite(desImagePath + srcImage, img_vis);
+//    imshow("show", img_vis);
 //    waitKey(0);
-    handleOneArucoMakerWithMeanShift(0, img_vis);
-
-
-
     return 0;
 }
 
 //====================================================================
-void handleOneArucoMakerWithMeanShift(int index, Mat _image) {
+Point2f caculateTheCentroid(vector<Point2f> &keypoints_within) {
+    int this_size = keypoints_within.size();
+
+    double x = 0.0, y = 0.0;
+    for (int i = 0; i < this_size; i++) {
+        x += keypoints_within[i].x;
+        y += keypoints_within[i].y;
+    }
+    x /= this_size;
+    y /= this_size;
+
+    return Point2f(x, y);
+}
+
+void handleOneArucoMakerWithMeanShift(int index, Mat &_image) {
     if (index >= ids.size()) {
         return;
     }
@@ -78,20 +90,26 @@ void handleOneArucoMakerWithMeanShift(int index, Mat _image) {
         line(_image, p0, p1, green, 1);
     }
 
+    vector<Point2f> keyPoint_within_aruco_marker;
+    keyPoint_within_aruco_marker.clear();
+
     double parallelogram_area = caculateAreaByShoelaceFormula(aruco_maker_vertices);
     int fast_detect_key_points_size = fast_detect_key_points.size();
     for (int i = 0; i < fast_detect_key_points_size; i++) {
         Point2f one_point = fast_detect_key_points[i].pt;
         if (checkPointWithinParallelogram(one_point, aruco_maker_vertices, parallelogram_area)) {
-            circle(_image, one_point, 1, red);
-        } else {
-            circle(_image, one_point, 1, yellow);
+//            circle(_image, one_point, 1, red);
+            keyPoint_within_aruco_marker.push_back(one_point);
         }
     }
 
+    Point2f aruco_marker_centroid = caculateTheCentroid(keyPoint_within_aruco_marker);
+//    circle(_image, aruco_marker_centroid, 1, red);
 
-    imshow("show", _image);
-    waitKey(0);
+    Point2f aruco_marker_center = caculateTheCentroid(aruco_maker_vertices);
+//    circle(_image, aruco_marker_center, 1, yellow);
+
+
 }
 
 void detectFastKeyPoint(Mat &img, vector<KeyPoint> &keyPoints) {
