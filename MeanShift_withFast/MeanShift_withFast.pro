@@ -20,7 +20,7 @@ SOURCES +=  \
 #main.cpp \
 #    videdetect.cpp \
 #    fastdetect.cpp \
-    fastmeanshift.cpp
+    fastmeanshift.cpp \
      Utils.cpp
 
 

@@ -3,15 +3,17 @@
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/features2d.hpp>
 #include <opencv2/aruco.hpp>
+#include "Utils.h"
 #include <strstream>
 #include <iostream>
+#include <map>
 using namespace cv;
 using namespace std;
 
-string srcImage1 = "frame_442.jpg";
-string srcImage2 = "frame_443.jpg";
-string srcImagePath = "/home/nimo/NewCamera/MeanShift_withFast_Data/Blur_mean_shift/";
-string desImagePath = "/home/nimo/NewCamera/MeanShift_withFast_Data/Result/";
+string project_path = "/home/nimo/NewCamera/MeanShift_withFast_Data/Result/";
+
+string tutorial_path = "/home/nimo/NewCamera/RealTimePoseEstimation_WithAurcoDetect_Data/";
+string video_path = tutorial_path + "box_with_60FPS.avi";
 
 // Use for Fast Detect
 int fast_threshold = 10;
@@ -26,6 +28,9 @@ int aruco_nums, aruco_nums_pre;
 // Use for float number equal
 double min_threshold = 0.01;
 
+// Remove absent
+int max_num_absent_frame = 4;
+map<int, int> aruco_marker_last_appear;
 // Color
 Scalar red(0, 0, 255);
 Scalar green(0,255,0);
@@ -42,59 +47,94 @@ void drawCenterAndEdge(Mat &_image, int index);
 float getShiftVectorSize(Point2f point);
 void calcAbsentMarkerIndex(vector <int> &collect);
 
+void addEstimateDataFromPerFrame(int index, int now_frame);
+void updateArucoMarkerShowMap(int frame_count);
 
 int main()
 {
-    Mat img_in_pre = imread(srcImagePath + srcImage1);
-    Mat img_in_now = imread(srcImagePath + srcImage2);
-
-    // step 1. get `img_in_now` fast detect
-    Mat img_now = img_in_now.clone();
-    detectFastKeyPoint(img_in_now, fast_detect_key_points);
-
-    // Step 2. get Aruco detect
-    cv::aruco::detectMarkers(img_in_pre, aruco_dictionary, corners_pre, ids_pre);
-    cv::aruco::detectMarkers(img_in_now, aruco_dictionary, corners, ids);
-    aruco_nums = ids.size();
-    aruco_nums_pre = ids_pre.size();
-
-    vector <int> absent_marker_index_in_pre_frame;
-    if (aruco_nums < aruco_nums_pre) {
-        calcAbsentMarkerIndex(absent_marker_index_in_pre_frame);
-
-        // Step3. detect the center and centroid
-        for (int i = 0; i < absent_marker_index_in_pre_frame.size(); i++)
+    try {
+        VideoCapture capture;
+        capture.open(video_path);
+        if(!capture.isOpened())
         {
-            Point2f shift_vector = Point2f(0.0, 0.0);
-            for (int iterat_id = 0; iterat_id < 10; iterat_id ++)
-            {
-                shiftAurcoMarker(absent_marker_index_in_pre_frame[i], shift_vector);
-                Point2f shift_vector_new = calcShiftCenterToCentroid(absent_marker_index_in_pre_frame[i]);
-
-                float new_shift_value = getShiftVectorSize(shift_vector_new);
-                float orignal_shift_value = getShiftVectorSize(shift_vector);
-
-                if (iterat_id > 0 && new_shift_value > orignal_shift_value ) {
-                    cout << "index:" << ids[i] << " count: " << iterat_id << endl;
-                    break;
-                } else {
-                    shift_vector = shift_vector_new;
-                }
-            }
-            drawCenterAndEdge(img_now, absent_marker_index_in_pre_frame[i]);
+            cout << "Could not open the camera device" << endl;
+            return -1;
         }
 
+        aruco_marker_last_appear.clear();
+        aruco_nums_pre = 0;
+        int frame_count = 0;
+        Mat frame;
+        while(capture.read(frame) && (char)waitKey(30) != 27) // capture frame until ESC is pressed
+        {
+            frame_count ++;
+            Mat img_in_now = frame.clone();
+
+            // step 1. get `img_in_now` fast detect
+            Mat img_now = img_in_now.clone();
+            detectFastKeyPoint(img_now, fast_detect_key_points);
+
+            // Step 2. get Aruco detect
+            cv::aruco::detectMarkers(img_now, aruco_dictionary, corners, ids);
+            cv::aruco::drawDetectedMarkers(img_now, corners, ids);
+            updateArucoMarkerShowMap(frame_count);
+            aruco_nums = ids.size();
+
+            vector <int> absent_marker_index_in_pre_frame;
+            if (aruco_nums < aruco_nums_pre) {
+                calcAbsentMarkerIndex(absent_marker_index_in_pre_frame);
+
+                // Step3. detect the center and centroid
+                for (int i = 0; i < absent_marker_index_in_pre_frame.size(); i++)
+                {
+                    Point2f shift_vector = Point2f(0.0, 0.0);
+                    for (int iterat_id = 0; iterat_id < 10; iterat_id ++)
+                    {
+                        shiftAurcoMarker(absent_marker_index_in_pre_frame[i], shift_vector);
+                        Point2f shift_vector_new = calcShiftCenterToCentroid(absent_marker_index_in_pre_frame[i]);
+
+                        float new_shift_value = getShiftVectorSize(shift_vector_new);
+                        float orignal_shift_value = getShiftVectorSize(shift_vector);
+
+                        if (iterat_id > 0 && new_shift_value > orignal_shift_value ) {
+//                            cout << "index:" << ids[i] << " count: " << iterat_id << endl;
+                            break;
+                        } else {
+                            shift_vector = shift_vector_new;
+                        }
+                    }
+                    drawCenterAndEdge(img_now, absent_marker_index_in_pre_frame[i]);
+                    addEstimateDataFromPerFrame(absent_marker_index_in_pre_frame[i], frame_count);
+                }
+
+            }
+
+            ids_pre = ids;
+            corners_pre = corners;
+            aruco_nums_pre = ids_pre.size();
+
+            imwrite(project_path + "frame_" + IntToString(frame_count) + ".jpg", img_now);
+        }
+        destroyAllWindows();
+    } catch (std::exception &ex) {
+        cout<<"Exception :"<<ex.what()<<endl;
     }
-
-    cv::aruco::drawDetectedMarkers(img_now, corners, ids);
-
-    imwrite(desImagePath + srcImage2, img_now);
-    imshow("show", img_now);
-    waitKey(0);
-    return 0;
 }
 
 //====================================================================
+void updateArucoMarkerShowMap(int frame_count) {
+    for (int i = 0; i < aruco_nums; i++) {
+        aruco_marker_last_appear[ids[i]] = frame_count;
+    }
+}
+
+void addEstimateDataFromPerFrame(int index, int now_frame) {
+    if (now_frame < aruco_marker_last_appear[ids_pre[index]] + max_num_absent_frame) {
+        ids.push_back(ids_pre[index]);
+        corners.push_back(corners_pre[index]);
+    }
+}
+
 void calcAbsentMarkerIndex(vector <int> &collect) {
     collect.clear();
     for (int i = 0; i < aruco_nums_pre; i++) {
