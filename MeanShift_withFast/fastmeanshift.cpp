@@ -8,10 +8,10 @@
 using namespace cv;
 using namespace std;
 
-string srcImage = "regist_orignal_3.jpg";
-string srcImagePath = "/home/nimo/NewCamera/MeanShift_withFast_Data/Regist/";
-string desImagePath = "/home/nimo/NewCamera/MeanShift_withFast_Data/Regit_meanShift/";
-
+string srcImage1 = "frame_442.jpg";
+string srcImage2 = "frame_443.jpg";
+string srcImagePath = "/home/nimo/NewCamera/MeanShift_withFast_Data/Blur_mean_shift/";
+string desImagePath = "/home/nimo/NewCamera/MeanShift_withFast_Data/Result/";
 
 // Use for Fast Detect
 int fast_threshold = 10;
@@ -19,8 +19,9 @@ vector<KeyPoint> fast_detect_key_points;
 
 // Use for Aurco Detect
 cv::Ptr<aruco::Dictionary> aruco_dictionary=aruco::getPredefinedDictionary(aruco::DICT_6X6_250);
-std::vector<int> ids;
-std::vector<std::vector<cv::Point2f> > corners;
+std::vector<int> ids, ids_pre;
+std::vector<std::vector<cv::Point2f> > corners, corners_pre;
+int aruco_nums, aruco_nums_pre;
 
 // Use for float number equal
 double min_threshold = 0.01;
@@ -39,58 +40,86 @@ void shiftAurcoMarker(int index, Point2f shift_vector);
 Point2f calcShiftCenterToCentroid(int index);
 void drawCenterAndEdge(Mat &_image, int index);
 float getShiftVectorSize(Point2f point);
+void calcAbsentMarkerIndex(vector <int> &collect);
 
 
 int main()
 {
-    Mat img_in = imread(srcImagePath + srcImage);
+    Mat img_in_pre = imread(srcImagePath + srcImage1);
+    Mat img_in_now = imread(srcImagePath + srcImage2);
 
-    // step 1. get fast detect
-    Mat img_vis;
-    img_in.copyTo(img_vis);
-    detectFastKeyPoint(img_vis, fast_detect_key_points);
+    // step 1. get `img_in_now` fast detect
+    Mat img_now = img_in_now.clone();
+    detectFastKeyPoint(img_in_now, fast_detect_key_points);
 
     // Step 2. get Aruco detect
-    img_in.copyTo(img_vis);
-    cv::aruco::detectMarkers(img_vis, aruco_dictionary, corners, ids);
+    cv::aruco::detectMarkers(img_in_pre, aruco_dictionary, corners_pre, ids_pre);
+    cv::aruco::detectMarkers(img_in_now, aruco_dictionary, corners, ids);
+    aruco_nums = ids.size();
+    aruco_nums_pre = ids_pre.size();
 
-    // Step3. detect the center and centroid
-    for (int i = 0; i < ids.size(); i++)
-    {
-        Point2f shift_vector = Point2f(0.0, 0.0);
-        for (int iterat_id = 0; iterat_id < 10; iterat_id ++)
+    vector <int> absent_marker_index_in_pre_frame;
+    if (aruco_nums < aruco_nums_pre) {
+        calcAbsentMarkerIndex(absent_marker_index_in_pre_frame);
+
+        // Step3. detect the center and centroid
+        for (int i = 0; i < absent_marker_index_in_pre_frame.size(); i++)
         {
-            shiftAurcoMarker(i, shift_vector);
-            Point2f shift_vector_new = calcShiftCenterToCentroid(i);
+            Point2f shift_vector = Point2f(0.0, 0.0);
+            for (int iterat_id = 0; iterat_id < 10; iterat_id ++)
+            {
+                shiftAurcoMarker(absent_marker_index_in_pre_frame[i], shift_vector);
+                Point2f shift_vector_new = calcShiftCenterToCentroid(absent_marker_index_in_pre_frame[i]);
 
-            float new_shift_value = getShiftVectorSize(shift_vector_new);
-            float orignal_shift_value = getShiftVectorSize(shift_vector);
+                float new_shift_value = getShiftVectorSize(shift_vector_new);
+                float orignal_shift_value = getShiftVectorSize(shift_vector);
 
-            if (iterat_id > 0 && new_shift_value > orignal_shift_value ) {
-                cout << "index:" << ids[i] << " count: " << iterat_id << endl;
-                break;
-            } else {
-                shift_vector = shift_vector_new;
+                if (iterat_id > 0 && new_shift_value > orignal_shift_value ) {
+                    cout << "index:" << ids[i] << " count: " << iterat_id << endl;
+                    break;
+                } else {
+                    shift_vector = shift_vector_new;
+                }
             }
+            drawCenterAndEdge(img_now, absent_marker_index_in_pre_frame[i]);
         }
-        drawCenterAndEdge(img_vis, i);
+
     }
 
-    imwrite(desImagePath + srcImage, img_vis);
-//    imshow("show", img_vis);
-//    waitKey(0);
+    cv::aruco::drawDetectedMarkers(img_now, corners, ids);
+
+    imwrite(desImagePath + srcImage2, img_now);
+    imshow("show", img_now);
+    waitKey(0);
     return 0;
 }
 
 //====================================================================
+void calcAbsentMarkerIndex(vector <int> &collect) {
+    collect.clear();
+    for (int i = 0; i < aruco_nums_pre; i++) {
+        int id = ids_pre[i];
+        bool isWithin = false;
+        for (int j = 0; j < aruco_nums; j++) {
+            if (ids[j] == id) {
+                isWithin = true;
+                break;
+            }
+        }
+        if (!isWithin) {
+            collect.push_back(i);
+        }
+    }
+}
+
 void drawCenterAndEdge(Mat &_image, int index) {
 
-    vector<cv::Point2f> aruco_maker_vertices = corners[index];
+    vector<cv::Point2f> aruco_maker_vertices = corners_pre[index];
     for(int j = 0; j < 4; j++) {
         Point2f p0, p1;
         p0 = aruco_maker_vertices[j];
         p1 = aruco_maker_vertices[(j + 1) % 4];
-        line(_image, p0, p1, green, 1);
+        line(_image, p0, p1, blue, 1);
     }
     Point2f aruco_marker_center = caculateTheCentroid(aruco_maker_vertices);
     circle(_image, aruco_marker_center, 1, red);
@@ -101,13 +130,13 @@ float getShiftVectorSize(Point2f point) {
 }
 
 void shiftAurcoMarker(int index, Point2f shift_vector) {
-    if (index >= ids.size()) {
+    if (index >= ids_pre.size()) {
         return;
     }
 
     for (int i = 0; i < 4; i++) {
-        corners[index][i].x += shift_vector.x;
-        corners[index][i].y += shift_vector.y;
+        corners_pre[index][i].x += shift_vector.x;
+        corners_pre[index][i].y += shift_vector.y;
     }
 }
 
@@ -126,11 +155,11 @@ Point2f caculateTheCentroid(vector<Point2f> &keypoints_within) {
 }
 
 Point2f calcShiftCenterToCentroid(int index) {
-    if (index >= ids.size()) {
+    if (index >= ids_pre.size()) {
         return Point2f(0.0, 0.0);
     }
 //    int aruco_id = ids[index];
-    vector<cv::Point2f> aruco_maker_vertices = corners[index];
+    vector<cv::Point2f> aruco_maker_vertices = corners_pre[index];
 
     vector<Point2f> keyPoint_within_aruco_marker;
     keyPoint_within_aruco_marker.clear();
